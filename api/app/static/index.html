@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ask Echo | Echo Madrid</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f8f9fb;
+        --card: #ffffff;
+        --line: #dce2eb;
+        --text: #182237;
+        --muted: #5d6879;
+        --accent: #866319;
+        --accent-hover: #6c4c0d;
+        --error: #a32e27;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        background:
+          radial-gradient(ellipse at top, #ffffff 0%, var(--bg) 65%);
+        color: var(--text);
+      }
+
+      .page {
+        min-height: 100vh;
+        width: min(40rem, 100%);
+        margin: 0 auto;
+        padding: 2.25rem 1.25rem 1.5rem;
+        display: flex;
+        flex-direction: column;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        gap: 0.9rem;
+        padding-bottom: 1.15rem;
+        margin-bottom: 1.35rem;
+        border-bottom: 1px solid var(--line);
+      }
+
+      header img {
+        height: 52px;
+        width: 52px;
+        object-fit: contain;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      .brand {
+        margin: 0 0 0.15rem;
+        color: var(--accent);
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 1.85rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        line-height: 1.15;
+      }
+
+      p.lede {
+        margin: 0 0 1.35rem;
+        color: var(--muted);
+        font-size: 0.92rem;
+        line-height: 1.45;
+      }
+
+      form {
+        display: flex;
+        gap: 0.55rem;
+      }
+
+      input[type="text"] {
+        flex: 1;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--text);
+        border-radius: 0.45rem;
+        padding: 0.8rem 0.95rem;
+        font: inherit;
+        font-size: 0.98rem;
+      }
+
+      input[type="text"]:focus {
+        outline: 2px solid var(--accent);
+        border-color: transparent;
+      }
+
+      #ask-button {
+        border: 0;
+        border-radius: 0.45rem;
+        background: var(--accent);
+        color: #ffffff;
+        font: inherit;
+        font-size: 0.92rem;
+        font-weight: 650;
+        letter-spacing: 0.02em;
+        padding: 0.8rem 1.2rem;
+        cursor: pointer;
+      }
+
+      #ask-button:hover:not(:disabled) {
+        background: var(--accent-hover);
+      }
+
+      #ask-button:disabled,
+      .chip:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+
+      .examples {
+        margin: 0.95rem 0 0;
+      }
+
+      .examples-label {
+        margin: 0 0 0.5rem;
+        color: var(--muted);
+        font-size: 0.75rem;
+        letter-spacing: 0.04em;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+      }
+
+      .chip {
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--muted);
+        border-radius: 999px;
+        font: inherit;
+        font-size: 0.78rem;
+        line-height: 1.3;
+        padding: 0.32rem 0.72rem;
+        cursor: pointer;
+      }
+
+      .chip:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+
+      #result {
+        margin-top: 1.35rem;
+        min-height: 6.25rem;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 0.55rem;
+        padding: 1.05rem 1.15rem;
+        font-size: 1rem;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+
+      #result.placeholder,
+      #result.loading {
+        color: var(--muted);
+      }
+
+      #result.error {
+        color: var(--error);
+      }
+
+      .about {
+        margin-top: 1.5rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--line);
+      }
+
+      .about h2 {
+        margin: 0 0 0.45rem;
+        color: var(--muted);
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .about p {
+        margin: 0 0 0.9rem;
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.5;
+      }
+
+      .github {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        border: 1px solid var(--accent);
+        border-radius: 999px;
+        color: var(--accent);
+        font-size: 0.8rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        text-decoration: none;
+        padding: 0.4rem 0.8rem;
+      }
+
+      .github:hover {
+        background: rgba(201, 162, 39, 0.12);
+        color: var(--accent-hover);
+        border-color: var(--accent-hover);
+      }
+
+      .github svg {
+        width: 0.95rem;
+        height: 0.95rem;
+        fill: currentColor;
+      }
+
+      footer {
+        margin-top: auto;
+        padding-top: 2rem;
+        color: var(--muted);
+        font-size: 0.72rem;
+        letter-spacing: 0.01em;
+        line-height: 1.45;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <img src="/static/logo.png" alt="Echo Madrid logo" />
+        <div>
+          <p class="brand">Echo Madrid</p>
+          <h1>Ask Echo</h1>
+        </div>
+      </header>
+      <main>
+        <p class="lede">Questions about Real Madrid matches and the La Liga table.</p>
+        <form id="ask-form">
+          <input
+            id="question"
+            type="text"
+            name="question"
+            placeholder="Where is Real Madrid in the table?"
+            autocomplete="off"
+            required
+          />
+          <button type="submit" id="ask-button">Ask</button>
+        </form>
+        <div class="examples">
+          <p class="examples-label">Try asking:</p>
+          <div class="chips">
+            <button type="button" class="chip">
+              Where is Real Madrid in the La Liga table?
+            </button>
+            <button type="button" class="chip">
+              What was Real Madrid's last result?
+            </button>
+            <button type="button" class="chip">
+              How did Real Madrid do in their last 5 matches?
+            </button>
+          </div>
+        </div>
+        <div id="result" class="placeholder" role="status">The answer will appear here.</div>
+        <section class="about">
+          <h2>How it works</h2>
+          <p>
+            Ask Echo answers only from a live database of real Real Madrid match and
+            standings data. It never fabricates statistics. Built with FastAPI, PostgreSQL,
+            and an LLM tool-calling layer.
+          </p>
+          <a
+            class="github"
+            href="https://github.com/ovais-yusuf/echo-madrid"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01
+                1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+                0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04
+                2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48
+                0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"
+              />
+            </svg>
+            View source on GitHub
+          </a>
+        </section>
+      </main>
+      <footer>
+        Echo Madrid: an unofficial fan project. Not affiliated with Real Madrid CF.
+      </footer>
+    </div>
+    <script>
+      const form = document.getElementById("ask-form");
+      const input = document.getElementById("question");
+      const button = document.getElementById("ask-button");
+      const chips = document.querySelectorAll(".chip");
+      const result = document.getElementById("result");
+
+      function show(text, className) {
+        result.className = className || "";
+        result.textContent = text;
+      }
+
+      function setBusy(busy) {
+        button.disabled = busy;
+        chips.forEach((chip) => {
+          chip.disabled = busy;
+        });
+      }
+
+      chips.forEach((chip) => {
+        chip.addEventListener("click", () => {
+          input.value = chip.textContent.trim();
+          form.requestSubmit();
+        });
+      });
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const question = input.value.trim();
+        if (!question) {
+          show("Enter a question first.", "error");
+          return;
+        }
+
+        setBusy(true);
+        show("Asking Echo…", "loading");
+
+        try {
+          const response = await fetch("/ask", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question }),
+          });
+
+          let payload = {};
+          try {
+            payload = await response.json();
+          } catch {
+            payload = {};
+          }
+
+          if (!response.ok) {
+            const detail = payload.detail;
+            const message =
+              typeof detail === "string"
+                ? detail
+                : "Ask Echo could not answer that right now.";
+            show(message, "error");
+            return;
+          }
+
+          show(payload.answer || "No answer returned.");
+        } catch {
+          show("Could not reach Ask Echo. Check your connection and try again.", "error");
+        } finally {
+          setBusy(false);
+        }
+      });
+    </script>
+  </body>
+</html>

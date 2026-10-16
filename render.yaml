@@ -1,0 +1,19 @@
+# Render Blueprint for the Echo Madrid FastAPI backend.
+# Postgres is hosted on Neon, so only the web service is defined here.
+# Secrets (DATABASE_URL, API keys) are set in the Render dashboard, not committed.
+services:
+  - type: web
+    name: echo-madrid-api
+    runtime: docker
+    rootDir: api
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /
+    preDeployCommand: alembic upgrade head
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: FOOTBALL_DATA_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
