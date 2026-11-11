@@ -279,7 +279,7 @@
         <section class="about">
           <h2>How it works</h2>
           <p>
-            Ask Echo answers only from a live database of real Real Madrid match and
+            Ask Echo answers only from a stored database of real Real Madrid match and
             standings data. It never fabricates statistics. Built with FastAPI, PostgreSQL,
             and an LLM tool-calling layer.
           </p>
@@ -308,6 +308,7 @@
       </footer>
     </div>
     <script>
+      const conversation = [];
       const form = document.getElementById("ask-form");
       const input = document.getElementById("question");
       const button = document.getElementById("ask-button");
@@ -348,7 +349,7 @@
           const response = await fetch("/ask", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question }),
+            body: JSON.stringify({ question, history: conversation.slice(-12) }),
           });
 
           let payload = {};
@@ -369,6 +370,15 @@
           }
 
           show(payload.answer || "No answer returned.");
+          conversation.push({role: "user", content: question}, {role: "assistant", content: (payload.answer || "").slice(0, 4000)});
+          const evidence = document.createElement("details");
+          const summary = document.createElement("summary");
+          summary.textContent = "Supporting records and timestamps";
+          const pre = document.createElement("pre");
+          pre.style.whiteSpace = "pre-wrap";
+          pre.textContent = JSON.stringify(payload.tool_calls, null, 2);
+          evidence.append(summary, pre);
+          document.getElementById("result").append(evidence);
         } catch {
           show("Could not reach Ask Echo. Check your connection and try again.", "error");
         } finally {

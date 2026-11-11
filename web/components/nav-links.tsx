@@ -11,6 +11,7 @@ export function NavLinks({ askHref }: { askHref: string }) {
         { href: "/", label: "Home" },
         { href: "/standings", label: "Standings" },
         { href: "/matches", label: "Matches" },
+        { href: "/matchday", label: "Matchday" },
         { href: "/team", label: "Team" },
       ].map(({ href, label }) => (
         <Link

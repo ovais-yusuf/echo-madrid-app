@@ -1,3 +1,4 @@
+import { LocalKickoff } from "@/components/match-tools";
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
@@ -120,13 +121,8 @@ function MatchItem({
         </div>
       </div>
       <div className="match-card-bottom">
-        <time dateTime={match.utc_date}>{date.date}</time>
-        <span>
-          {match.status === "SCHEDULED"
-            ? "Kick-off not confirmed"
-            : `${date.time} UTC`}
-          {finished ? " · Full time" : ""}
-        </span>
+        <LocalKickoff match={match} />
+        {finished && <span>Full time</span>}
       </div>
     </article>
   );
@@ -385,7 +381,7 @@ export default async function MatchesPage({
           <div>
             <h3>Stored data. Clear limits.</h3>
             <p>
-              All times are in UTC. Statuses and scores reflect our last
+              Kickoff times use your device timezone once loaded (UTC before loading). Statuses and scores reflect our last
               imports, not a live match feed. Free-tier data may be delayed.
               Upcoming includes future scheduled fixtures; postponed and other
               statuses remain under All matches.

@@ -13,8 +13,6 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import get_football_data_api_key
-from app.database import SessionLocal
 from app.models import (
     Competition,
     IngestionRun,
@@ -32,7 +30,7 @@ REAL_MADRID_TEAM_ID = 86
 API_BASE_URL = "https://api.football-data.org/v4"
 
 # football-data.org free tier: 10 requests per minute.
-FREE_TIER_MAX_REQUESTS = 10
+FREE_TIER_MAX_REQUESTS = 8
 FREE_TIER_WINDOW_SECONDS = 60.0
 
 
@@ -83,16 +81,42 @@ class FootballDataClient:
         self.close()
 
     def get(self, path: str, **params: Any) -> dict[str, Any]:
-        self._limiter.wait()
-        response = self._client.get(path, params=params or None)
-        if response.status_code == 429:
-            retry_after = float(response.headers.get("Retry-After", FREE_TIER_WINDOW_SECONDS))
-            logger.warning("Received 429; retrying after %.0fs", retry_after)
-            time.sleep(retry_after)
+        # Bounded retry budget; never retry authentication/coverage errors.
+        from email.utils import parsedate_to_datetime
+        from datetime import timezone
+        import random
+        for attempt in range(4):
             self._limiter.wait()
-            response = self._client.get(path, params=params or None)
-        response.raise_for_status()
-        return response.json()
+            try:
+                response = self._client.get(path, params=params or None)
+                if response.status_code not in {429, 500, 502, 503, 504}:
+                    response.raise_for_status()
+                    return response.json()
+                response.raise_for_status()
+            except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code not in {429, 500, 502, 503, 504}:
+                    raise
+                if attempt == 3:
+                    raise
+                delay = 2 ** attempt + random.random()
+                if isinstance(exc, httpx.HTTPStatusError):
+                    header = exc.response.headers.get("Retry-After")
+                    if exc.response.status_code == 429:
+                        delay = 60
+                    if header:
+                        try:
+                            delay = max(delay, float(header))
+                        except ValueError:
+                            try:
+                                delay = max(delay, (parsedate_to_datetime(header) - datetime.now(timezone.utc)).total_seconds())
+                            except (ValueError, TypeError):
+                                pass
+                # Do not violate a long Retry-After: abandon this cycle instead.
+                if delay > 120:
+                    raise
+                logger.warning("Provider retry attempt=%s delay=%.1f type=%s", attempt + 1, delay, type(exc).__name__)
+                time.sleep(delay)
+        raise RuntimeError("Provider retry budget exhausted")
 
     def get_team_matches(self, team_id: int = REAL_MADRID_TEAM_ID) -> dict[str, Any]:
         return self.get(f"/teams/{team_id}/matches")
@@ -206,6 +230,7 @@ def upsert_match(
         home_score=full_time.get("home"),
         away_score=full_time.get("away"),
         matchday=payload.get("matchday"),
+        updated_at=utc_now(),
     )
 
 
@@ -232,53 +257,9 @@ def ingest_matches(session: Session, matches: list[dict[str, Any]]) -> int:
     return len(matches)
 
 
-def _mark_failed(session: Session, run_id: int, exc: BaseException) -> None:
-    session.rollback()
-    run = session.get(IngestionRun, run_id)
-    if run is None:
-        return
-    run.status = "failed"
-    run.finished_at = utc_now()
-    run.error = f"{type(exc).__name__}: {exc}"
-    session.commit()
-
-
 def run_ingestion() -> IngestionRun:
-    session = SessionLocal()
-    run = IngestionRun(
-        source=SOURCE,
-        entity_type=ENTITY_TYPE,
-        started_at=utc_now(),
-        status="running",
-        records_upserted=0,
-    )
-    session.add(run)
-    session.commit()
-    run_id = run.id
-
-    try:
-        api_key = get_football_data_api_key()
-        with FootballDataClient(api_key) as client:
-            payload = client.get_team_matches(REAL_MADRID_TEAM_ID)
-        matches = payload.get("matches") or []
-        count = ingest_matches(session, matches)
-        run.status = "success"
-        run.finished_at = utc_now()
-        run.records_upserted = count
-        session.commit()
-        session.refresh(run)
-        session.expunge(run)
-        return run
-    except Exception as exc:
-        logger.exception("Ingestion failed")
-        _mark_failed(session, run_id, exc)
-        run = session.get(IngestionRun, run_id)
-        if run is None:
-            raise
-        session.expunge(run)
-        return run
-    finally:
-        session.close()
+    from pipeline.worker import run_once
+    return run_once(only="match")[0]
 
 
 def main() -> int:

@@ -22,12 +22,12 @@ export function StandingsTable({
         .includes(search.trim().toLowerCase()),
   );
   return (
-    <section className="table-card" aria-labelledby="table-title">
+    <section className="table-card" aria-label={`Standings for ${season}`}>
       <div className="table-heading">
         <div>
           <span className="eyebrow">THE FULL PICTURE</span>
-          <h2 id="table-title">
-            League table <span>{season}</span>
+          <h2>
+            Stored table <span>{season}</span>
           </h2>
         </div>
         <RefreshButton />
@@ -55,12 +55,12 @@ export function StandingsTable({
       <div
         className="table-scroll"
         role="region"
-        aria-label="Scrollable La Liga standings"
+        aria-label="Scrollable competition standings"
         tabIndex={0}
       >
         <table>
           <caption className="sr-only">
-            La Liga standings for {season}, sorted by stored league position.
+            Competition standings for {season}, sorted by stored league position.
             All values come from the database.
           </caption>
           <thead>

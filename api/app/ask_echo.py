@@ -4,20 +4,22 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from app.config import get_openai_api_key
-from app.queries import find_team_by_name, get_real_madrid, get_standings, get_team_matches
+from app.models import utc_now
+from app.queries import find_team_by_name, get_real_madrid, get_standings, get_team_matches, team_record, freshness
 from app.schemas import MatchRead, StandingRead, ToolCallRecord
 
 NO_DATA_ANSWER = "I don't have that data."
 DEFAULT_MATCH_LIMIT = 10
 MAX_MATCH_LIMIT = 100
 MAX_STANDINGS_LIMIT = 20
-ALLOWED_STATUSES = frozenset({"SCHEDULED", "FINISHED"})
+ALLOWED_STATUSES = frozenset({"SCHEDULED", "TIMED", "IN_PLAY", "PAUSED", "FINISHED", "POSTPONED", "CANCELLED", "SUSPENDED"})
 MODEL = "gpt-4o-mini"
 
 SYSTEM_PROMPT = """You are Ask Echo, a Real Madrid and La Liga assistant.
@@ -64,7 +66,7 @@ GET_TEAM_MATCHES_TOOL: dict[str, Any] = {
                 },
                 "status": {
                     "type": "string",
-                    "enum": ["SCHEDULED", "FINISHED"],
+                    "enum": sorted(ALLOWED_STATUSES),
                     "description": (
                         "If set, only return matches with this status."
                     ),
@@ -112,22 +114,6 @@ GET_STANDINGS_TOOL: dict[str, Any] = {
 TOOLS: list[dict[str, Any]] = [GET_TEAM_MATCHES_TOOL, GET_STANDINGS_TOOL]
 
 
-def _parse_json_object(raw_arguments: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(raw_arguments or "{}")
-    except json.JSONDecodeError:
-        parsed = {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    return max(minimum, min(parsed, maximum))
-
-
 def _serialize_matches(matches: list[Any]) -> list[dict[str, Any]]:
     return [MatchRead.model_validate(match).model_dump(mode="json") for match in matches]
 
@@ -136,33 +122,27 @@ def _serialize_standings(rows: list[Any]) -> list[dict[str, Any]]:
     return [StandingRead.model_validate(row).model_dump(mode="json") for row in rows]
 
 
+class MatchArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    limit: int = Field(default=10, ge=1, le=100)
+    status: Literal["SCHEDULED", "TIMED", "IN_PLAY", "PAUSED", "FINISHED", "POSTPONED", "CANCELLED", "SUSPENDED"] | None = None
+
+
+class StandingsArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    limit: int | None = Field(default=None, ge=1, le=20)
+    team_name: str | None = Field(default=None, min_length=1, max_length=100)
+
+
 def parse_get_team_matches_args(raw_arguments: str) -> dict[str, Any]:
-    """Parse model-supplied args. Team is never taken from the model."""
-    parsed = _parse_json_object(raw_arguments)
-    limit = _clamp_int(
-        parsed.get("limit", DEFAULT_MATCH_LIMIT),
-        DEFAULT_MATCH_LIMIT,
-        1,
-        MAX_MATCH_LIMIT,
-    )
-    status = parsed.get("status")
-    if status is not None:
-        status = str(status).upper()
-        if status not in ALLOWED_STATUSES:
-            status = None
-    return {"limit": limit, "status": status}
+    parsed = json.loads(raw_arguments)
+    if isinstance(parsed, dict):
+        parsed.pop("team_id", None)  # Provider Madrid identity is server-owned.
+    return MatchArguments.model_validate(parsed).model_dump()
 
 
 def parse_get_standings_args(raw_arguments: str) -> dict[str, Any]:
-    """Parse model-supplied args. Team ids from the model are ignored."""
-    parsed = _parse_json_object(raw_arguments)
-    limit = parsed.get("limit")
-    if limit is not None:
-        limit = _clamp_int(limit, MAX_STANDINGS_LIMIT, 1, MAX_STANDINGS_LIMIT)
-    team_name = parsed.get("team_name")
-    if team_name is not None:
-        team_name = str(team_name).strip() or None
-    return {"limit": limit, "team_name": team_name}
+    return StandingsArguments.model_validate_json(raw_arguments).model_dump()
 
 
 def execute_get_team_matches(
@@ -175,7 +155,8 @@ def execute_get_team_matches(
         db,
         team.id,
         limit=arguments.get("limit", DEFAULT_MATCH_LIMIT),
-        status=arguments.get("status"),
+        status=None if arguments.get("status") == "SCHEDULED" else arguments.get("status"),
+        **({"statuses": ("SCHEDULED", "TIMED"), "after": utc_now(), "ascending": True} if arguments.get("status") == "SCHEDULED" else {}),
     )
     return _serialize_matches(matches)
 
@@ -207,55 +188,75 @@ _TOOL_HANDLERS: dict[
 }
 
 
-def ask_echo(db: Session, question: str) -> tuple[str, list[ToolCallRecord]]:
-    client = OpenAI(api_key=get_openai_api_key())
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": question},
-    ]
-    tool_calls: list[ToolCallRecord] = []
 
-    first = client.chat.completions.create(
-        model=MODEL,
-        messages=messages,
-        tools=TOOLS,
-        tool_choice="auto",
-    )
-    message = first.choices[0].message
+class RecordArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    limit: int = Field(default=5, ge=1, le=100)
+    venue: Literal["all", "home", "away"] = "all"
+    season: str | None = Field(default=None, max_length=20)
+    opponent: str | None = Field(default=None, max_length=100)
 
-    if not message.tool_calls:
-        return NO_DATA_ANSWER, tool_calls
 
-    messages.append(message)
-    has_data = False
-    for call in message.tool_calls:
+def parse_record(raw):
+    return RecordArguments.model_validate_json(raw).model_dump()
+
+
+def execute_record(db, arguments):
+    team = get_real_madrid(db)
+    return team_record(db, team, **arguments) if team else {}
+
+
+TOOLS.append({"type": "function", "function": {
+    "name": "get_record", "description": "Calculate Madrid recent form, scored/conceded goals, clean sheets, home/away records and results versus a named opponent. Sample limited to covered finished matches. Use venue for follow-up questions about away or home games.",
+    "parameters": RecordArguments.model_json_schema()}})
+_TOOL_HANDLERS["get_record"] = (parse_record, execute_record)
+
+
+def render_evidence(name, data):
+    """Deterministic text: the model chooses a query but cannot invent facts."""
+    if name == "get_record":
+        if not data.get("available"):
+            return NO_DATA_ANSWER
+        return (f"{data['team']} — {data['venue']} sample: {data['count']} completed matches "
+                f"({data['period_start']} to {data['period_end']}). "
+                f"{data['won']} wins, {data['drawn']} draws, {data['lost']} losses; "
+                f"{data['goals_for']} scored, {data['goals_against']} conceded; "
+                f"{data['clean_sheets']} clean sheets. Form (oldest first): "
+                + ' '.join(data['form_oldest_first']) + '. ' + data['scope'])
+    if name == "get_team_matches":
+        return '\n'.join(f"{r['utc_date']}: {r['home_team']['name']} "
+            f"{r['home_score'] if r['home_score'] is not None else '—'}–"
+            f"{r['away_score'] if r['away_score'] is not None else '—'} {r['away_team']['name']} "
+            f"({r['status']})" for r in data)
+    if name == "get_standings":
+        return '\n'.join(f"{r['position']}. {r['team']['name']}: {r['points']} points" for r in data)
+    return NO_DATA_ANSWER
+
+
+def ask_echo(db: Session, question: str, history=None) -> tuple[str, list[ToolCallRecord]]:
+    client = OpenAI(api_key=get_openai_api_key(), timeout=30, max_retries=1)
+    messages = [{"role": "system", "content": SYSTEM_PROMPT +
+                 " Use get_record for calculated statistics. Conversation history is only for intent and filters, never factual evidence. Resolve follow-ups using prior questions. Do not treat an old answer as current data."}]
+    messages.extend(history or [])
+    messages.append({"role": "user", "content": question})
+    first = client.chat.completions.create(model=MODEL, messages=messages, tools=TOOLS, tool_choice="auto")
+    calls = first.choices[0].message.tool_calls or []
+    if not calls:
+        return NO_DATA_ANSWER, []
+    records, answers = [], []
+    for call in calls[:4]:
         handler = _TOOL_HANDLERS.get(call.function.name)
-        if handler is None:
-            arguments: dict[str, Any] = {}
-            payload: Any = {"error": f"Unknown tool: {call.function.name}"}
-        else:
-            parse, execute = handler
-            arguments = parse(call.function.arguments)
-            payload = execute(db, arguments)
-            has_data = has_data or bool(payload)
-        tool_calls.append(ToolCallRecord(name=call.function.name, arguments=arguments))
-        messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": json.dumps(payload),
-            }
-        )
-
-    # Empty rows and unknown tools cannot become an invitation to improvise.
-    if not has_data:
-        return NO_DATA_ANSWER, tool_calls
-
-    final = client.chat.completions.create(
-        model=MODEL,
-        messages=messages,
-        tool_choice="none",
-        tools=TOOLS,
-    )
-    answer = final.choices[0].message.content or NO_DATA_ANSWER
-    return answer, tool_calls
+        arguments, payload = {}, None
+        if handler:
+            try:
+                arguments = handler[0](call.function.arguments)
+                payload = handler[1](db, arguments)
+            except (ValidationError, ValueError, TypeError):
+                payload = None
+        clock = freshness(db, "standing:PD" if call.function.name == "get_standings" else "match")
+        records.append(ToolCallRecord(name=call.function.name, arguments=arguments,
+                                      evidence={"data": payload, "freshness": clock}))
+        if payload and (not isinstance(payload, dict) or payload.get("available")):
+            answers.append(render_evidence(call.function.name, payload) +
+                           f"\nSource: football-data.org. Last successful import: {clock['last_success'] or 'unknown'}. {clock['message']}")
+    return "\n\n".join(answers) or NO_DATA_ANSWER, records

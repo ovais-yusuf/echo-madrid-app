@@ -1,3 +1,4 @@
+import { MatchdayPanel } from "@/components/matchday-panel";
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
@@ -138,6 +139,7 @@ export default async function HomePage() {
         </div>
       </section>
 
+      <MatchdayPanel compact />
       <div className="snapshot-bar">
         <div>
           <span className="snapshot-label">DATABASE SNAPSHOT</span>

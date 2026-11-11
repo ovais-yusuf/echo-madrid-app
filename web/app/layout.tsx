@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import "./globals.css";
+import { DataStatus } from "@/components/data-status";
+import { AutoRefresh } from "@/components/auto-refresh";
 
 // Read the legacy app address at request time, including on error/404 pages.
 export const dynamic = "force-dynamic";
@@ -22,6 +24,8 @@ export default function RootLayout({
           Skip to content
         </a>
         <Header />
+        <AutoRefresh />
+        <DataStatus />
         <main id="main-content">{children}</main>
         <Footer />
       </body>

@@ -47,14 +47,14 @@ def matches(
 
 
 @app.get("/standings", response_model=StandingsResponse)
-def standings(db: Session = Depends(get_db)) -> StandingsResponse:
-    """Latest stored La Liga table. Empty data is a valid, explicit state."""
-    season = get_latest_standings_season(db)
+def standings(competition: Literal["PD", "CL"] = "PD", db: Session = Depends(get_db)) -> StandingsResponse:
+    """Latest stored table for the selected competition. Empty data is a valid, explicit state."""
+    season = get_latest_standings_season(db, competition)
     if season is None:
         return StandingsResponse(
             competition=None, season=None, updated_at=None, standings=[]
         )
-    rows = fetch_standings(db, season_id=season.id)
+    rows = fetch_standings(db, season_id=season.id, competition_code=competition)
     return StandingsResponse(
         competition=CompetitionRead.model_validate(season.competition),
         season=StandingsSeasonRead.model_validate(season),
@@ -116,7 +116,7 @@ def get_match(id: int, db: Session = Depends(get_db)) -> MatchRead:
 @app.post("/ask", response_model=AskResponse)
 def ask(body: AskRequest, db: Session = Depends(get_db)) -> AskResponse:
     try:
-        answer, tool_calls = ask_echo(db, body.question)
+        answer, tool_calls = ask_echo(db, body.question, [turn.model_dump() for turn in body.history])
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except OpenAIError as exc:
@@ -125,3 +125,56 @@ def ask(body: AskRequest, db: Session = Depends(get_db)) -> AskResponse:
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/health")
+def health(db: Session = Depends(get_db)):
+    from sqlalchemy import text
+    db.execute(text("SELECT 1"))
+    return {"status": "ok"}
+
+
+@app.get("/freshness")
+def data_freshness(db: Session = Depends(get_db)):
+    from app.queries import freshness
+    return {key: freshness(db, entity) for key, entity in (
+        ("matches", "match"), ("PD", "standing:PD"), ("CL", "standing:CL"))}
+
+
+@app.get("/matchday")
+def matchday_centre(db: Session = Depends(get_db)):
+    from app.queries import matchday
+    return matchday(db)
+
+
+@app.get("/preview")
+def preview(db: Session = Depends(get_db)):
+    from app.queries import opponent_preview
+    return opponent_preview(db)
+
+
+@app.get("/analytics")
+def analytics(venue: Literal["all", "home", "away"] = "all", limit: int = Query(100, ge=1, le=100),
+              season: str | None = Query(None, max_length=20), db: Session = Depends(get_db)):
+    from app.queries import get_real_madrid, team_record, get_madrid_match_page
+    team = get_real_madrid(db)
+    if not team:
+        return {"available": False, "reason": "Madrid data unavailable."}
+    selected = season or get_madrid_match_page(db)["selected_season"]
+    return team_record(db, team, venue=venue, limit=limit, season=selected)
+
+
+@app.get("/standings-changes")
+def changes(competition: Literal["PD", "CL"] = "PD", db: Session = Depends(get_db)):
+    from app.queries import standings_changes
+    return standings_changes(db, competition)
+
+
+@app.get("/calendar/{id}.ics")
+def calendar(id: int, db: Session = Depends(get_db)):
+    from app.exports import calendar_event
+    from fastapi.responses import Response
+    match = fetch_match(db, id)
+    if match is None:
+        raise HTTPException(404, "Match not found")
+    return Response(calendar_event(match), media_type="text/calendar", headers={"Content-Disposition": f'attachment; filename="echo-madrid-{match.external_id}.ics"'})

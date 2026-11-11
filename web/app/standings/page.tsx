@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { TableSimulator } from "@/components/table-simulator";
+import { getData, type Changes } from "@/lib/api";
 import type { Metadata } from "next";
 import {
   getStandings,
@@ -11,10 +14,15 @@ import { RefreshButton } from "@/components/refresh-button";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "La Liga standings" };
 
-export default async function StandingsPage() {
+export default async function StandingsPage({searchParams}: {searchParams: Promise<{competition?: string}>}) {
+  const params = await searchParams;
+  const code = params.competition === "CL" ? "CL" : "PD";
+  const title = code === "CL" ? "Champions League" : "La Liga";
+  let changes: Changes | null = null;
+  try { changes = await getData<Changes>(`/standings-changes?competition=${code}`); } catch {}
   let data: StandingsResponse | null = null;
   try {
-    data = await getStandings();
+    data = await getStandings(code);
   } catch {
     /* Render a recoverable state without leaking upstream details. */
   }
@@ -32,7 +40,7 @@ export default async function StandingsPage() {
         <div className="hero-copy">
           <div className="eyebrow">
             <span className="gold-line" />
-            SPAIN / LA LIGA
+            {title.toUpperCase()}
           </div>
           <h1 id="page-title">
             Every point.
@@ -40,7 +48,7 @@ export default async function StandingsPage() {
             <span>Every position.</span>
           </h1>
           <p>
-            La Liga standings, with Madrid in focus.
+            {title} standings, with Madrid in focus.
             <br className="desktop-break" /> The latest table stored in our
             database.
           </p>
@@ -50,6 +58,8 @@ export default async function StandingsPage() {
           <span>LEAGUE STANDINGS</span>
         </div>
       </section>
+      <nav className="card-actions" aria-label="Standings competition"><Link className="refresh-button" href="/standings?competition=PD" aria-current={code === "PD" ? "page" : undefined}>La Liga</Link><Link className="refresh-button" href="/standings?competition=CL" aria-current={code === "CL" ? "page" : undefined}>Champions League</Link></nav>
+      {code === "CL" && <p>Provider league-phase or group tables are shown separately by stage. Knockout rounds do not have a league table. Qualification and tie-break rules differ from La Liga.</p>}
       <div className="snapshot-bar">
         <div>
           <span className="snapshot-label">DATABASE SNAPSHOT</span>
@@ -80,7 +90,7 @@ export default async function StandingsPage() {
           <span className="eyebrow">NO TABLE YET</span>
           <h2>The standings aren’t available yet.</h2>
           <p>
-            There are no La Liga standings in the database. They will appear
+            There are no {title} standings in the database. They will appear
             here after the next successful data import.
           </p>
           <RefreshButton />
@@ -95,7 +105,7 @@ export default async function StandingsPage() {
               <span className="eyebrow">OUR CLUB, AT A GLANCE</span>
               <h2>Real Madrid</h2>
               <span className="summary-context">
-                {season ? `${season} · La Liga` : "La Liga"}
+                {season ? `${season} · ${title}` : title}
               </span>
             </div>
             <div className="summary-stat">
@@ -138,7 +148,9 @@ export default async function StandingsPage() {
               unavailable.
             </p>
           )}
-          <StandingsTable rows={rows} season={season || "Season unavailable"} />
+          {Array.from(new Set(rows.map(r => `${r.stage || "Table"} · ${r.group_name || "Overall"}`))).map(group => <div key={group}><h3>{group}</h3><StandingsTable rows={rows.filter(r => `${r.stage || "Table"} · ${r.group_name || "Overall"}` === group)} season={season || "Season unavailable"} /></div>)}
+          <section className="team-block"><h2>What changed?</h2>{changes?.available ? <><p>{changes.from} to {changes.to}</p><p>{changes.note}</p>{changes.changes?.filter(c => c.points_change !== 0 || c.position_change !== 0).map(c => <p key={c.team}>{c.team}: {c.position_change > 0 ? "+" : ""}{c.position_change} positions · {c.points_change > 0 ? "+" : ""}{c.points_change} points</p>)}<details><summary>Relevant stored league results</summary>{changes.results_in_interval?.length ? changes.results_in_interval.map(m => <p key={m.id}>{m.utc_date.slice(0,10)} · {m.home_team.name} {m.home_score}–{m.away_score} {m.away_team.name}</p>) : <p>No covered results in this snapshot interval.</p>}</details></> : <p>{changes?.reason || "Snapshot comparison unavailable."}</p>}</section>
+          {code === "PD" && <TableSimulator key={`${season}-${data.updated_at}`} rows={rows}/>}
           <div className="below-table">
             <aside className="data-note">
               <span className="note-icon" aria-hidden="true">

@@ -9,11 +9,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import get_football_data_api_key
-from app.database import SessionLocal
-from app.models import Competition, IngestionRun, Season, Standing, Team, utc_now
+from app.models import Competition, IngestionRun, Season, Standing, StandingsSnapshot, Team, utc_now
 from pipeline.ingest_matches import (
-    FootballDataClient,
     upsert_competition,
     upsert_season,
     upsert_team,
@@ -39,6 +36,8 @@ def upsert_standing(
         )
     )
     fields = {
+        "stage": row.get("stage"),
+        "group_name": row.get("group_name"),
         "position": row["position"],
         "played": row["playedGames"],
         "won": row["won"],
@@ -63,7 +62,7 @@ def _total_tables(payload: dict[str, Any]) -> list[dict[str, Any]]:
     tables: list[dict[str, Any]] = []
     for standing in payload.get("standings") or []:
         if standing.get("type") == "TOTAL":
-            tables.extend(standing.get("table") or [])
+            tables.extend({**row, "stage": standing.get("stage"), "group_name": standing.get("group")} for row in standing.get("table") or [])
     return tables
 
 
@@ -79,58 +78,28 @@ def ingest_standings(session: Session, payload: dict[str, Any]) -> int:
     if not rows:
         raise RuntimeError("Standings payload had no TOTAL table")
 
+    identities = [row["team"]["id"] for row in rows]
+    if len(set(identities)) != len(identities):
+        raise ValueError("Multiple standings stages for one team are not supported; retaining last table")
+    previous = session.scalar(select(StandingsSnapshot).where(
+        StandingsSnapshot.season_id == season.id
+    ).order_by(StandingsSnapshot.id.desc()).limit(1))
+    if previous is None or previous.rows != rows:
+        session.add(StandingsSnapshot(season_id=season.id, rows=rows))
+    # Remove rows absent from an authoritative replacement, within the same transaction.
+    current_ids = []
     for row in rows:
         team = upsert_team(session, row["team"], teams)
         upsert_standing(session, season.id, team.id, row)
+        current_ids.append(team.id)
+    from sqlalchemy import delete
+    session.execute(delete(Standing).where(Standing.season_id == season.id, Standing.team_id.not_in(current_ids)))
     return len(rows)
 
 
-def _mark_failed(session: Session, run_id: int, exc: BaseException) -> None:
-    session.rollback()
-    run = session.get(IngestionRun, run_id)
-    if run is None:
-        return
-    run.status = "failed"
-    run.finished_at = utc_now()
-    run.error = f"{type(exc).__name__}: {exc}"
-    session.commit()
-
-
 def run_ingestion() -> IngestionRun:
-    session = SessionLocal()
-    run = IngestionRun(
-        source=SOURCE,
-        entity_type=ENTITY_TYPE,
-        started_at=utc_now(),
-        status="running",
-        records_upserted=0,
-    )
-    session.add(run)
-    session.commit()
-    run_id = run.id
-
-    try:
-        api_key = get_football_data_api_key()
-        with FootballDataClient(api_key) as client:
-            payload = client.get_competition_standings(LA_LIGA_CODE)
-        count = ingest_standings(session, payload)
-        run.status = "success"
-        run.finished_at = utc_now()
-        run.records_upserted = count
-        session.commit()
-        session.refresh(run)
-        session.expunge(run)
-        return run
-    except Exception as exc:
-        logger.exception("Ingestion failed")
-        _mark_failed(session, run_id, exc)
-        run = session.get(IngestionRun, run_id)
-        if run is None:
-            raise
-        session.expunge(run)
-        return run
-    finally:
-        session.close()
+    from pipeline.worker import run_once
+    return run_once(only="standing:PD")[0]
 
 
 def main() -> int:

@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,6 +35,8 @@ class MatchRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    external_id: int
+    updated_at: datetime | None = None
     utc_date: datetime
     status: str
     home_team: TeamRef
@@ -47,6 +49,8 @@ class MatchRead(BaseModel):
 class StandingRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    stage: str | None = None
+    group_name: str | None = None
     position: int
     team: TeamRef
     played: int
@@ -99,13 +103,20 @@ class MatchesResponse(BaseModel):
     has_more: bool
 
 
+class ConversationTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
 class AskRequest(BaseModel):
-    question: str = Field(min_length=1)
+    question: str = Field(min_length=1, max_length=2000)
+    history: list[ConversationTurn] = Field(default_factory=list, max_length=12)
 
 
 class ToolCallRecord(BaseModel):
     name: str
     arguments: dict[str, Any]
+    evidence: Any = None
 
 
 class AskResponse(BaseModel):

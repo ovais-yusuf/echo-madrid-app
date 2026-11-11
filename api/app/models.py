@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     Date,
     DateTime,
     ForeignKey,
@@ -128,6 +129,7 @@ class Match(Base):
     home_score: Mapped[int | None] = mapped_column(Integer)
     away_score: Mapped[int | None] = mapped_column(Integer)
     matchday: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     competition: Mapped[Competition] = relationship(back_populates="matches")
     season: Mapped[Season] = relationship(back_populates="matches")
@@ -150,6 +152,8 @@ class Standing(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     season_id: Mapped[int] = mapped_column(ForeignKey("season.id"), nullable=False)
     team_id: Mapped[int] = mapped_column(ForeignKey("team.id"), nullable=False)
+    stage: Mapped[str | None] = mapped_column(String(100))
+    group_name: Mapped[str | None] = mapped_column(String(100))
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     played: Mapped[int] = mapped_column(Integer, nullable=False)
     won: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -182,3 +186,11 @@ class IngestionRun(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False)
     records_upserted: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class StandingsSnapshot(Base):
+    __tablename__ = "standings_snapshot"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey("season.id"), index=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    rows: Mapped[list] = mapped_column(JSON, nullable=False)

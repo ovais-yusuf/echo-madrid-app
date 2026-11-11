@@ -1,0 +1,9 @@
+# API service: repository root, not /api. Worker uses same image with override below.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "api/Dockerfile"
+[deploy]
+preDeployCommand = "cd api && alembic upgrade head"
+startCommand = "sh -c 'uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}'"
+healthcheckPath = "/health"
+restartPolicyType = "ON_FAILURE"

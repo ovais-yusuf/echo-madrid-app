@@ -1,6 +1,8 @@
 import "server-only";
 
 export type Standing = {
+  stage: string | null;
+  group_name: string | null;
   position: number;
   team: {
     id: number;
@@ -42,12 +44,12 @@ export function legacySiteUrl(): string {
   );
 }
 
-export async function getStandings(): Promise<StandingsResponse> {
+export async function getStandings(competition = "PD"): Promise<StandingsResponse> {
   const base = (process.env.API_BASE_URL || "http://localhost:8000").replace(
     /\/$/,
     "",
   );
-  const response = await fetch(`${base}/standings`, {
+  const response = await fetch(`${base}/standings?competition=${encodeURIComponent(competition)}`, {
     cache: "no-store",
     signal: AbortSignal.timeout(10_000),
     headers: { Accept: "application/json" },
@@ -74,6 +76,8 @@ export function formatUpdatedAt(value: string | null): string | null {
 
 export type MatchCard = {
   id: number;
+  external_id: number;
+  updated_at: string | null;
   utc_date: string;
   status: string;
   home_team: Standing["team"];
@@ -111,5 +115,23 @@ export async function getMatches(
     headers: { Accept: "application/json" },
   });
   if (!response.ok) throw new Error("Matches unavailable");
+  return response.json();
+}
+
+export type Freshness = { access_issue?: boolean; source: string; last_success: string | null; stale: boolean; message: string; last_attempt_status: string };
+export type Matchday = { current: MatchCard | null; next: MatchCard | null; latest: MatchCard | null; unresolved: MatchCard[]; freshness: Freshness };
+export type RecordData = {
+  available: boolean; reason?: string; team: string; venue: string; count: number;
+  won: number; drawn: number; lost: number; goals_for: number; goals_against: number; clean_sheets: number;
+  period_start: string | null; period_end: string | null; form_oldest_first: string[];
+  matches: MatchCard[]; freshness: Freshness; scope: string;
+  progress: {date: string; goals_for: number; goals_against: number; cumulative_result_points: number}[];
+};
+export type Preview = {available: boolean; reason?: string; fixture: MatchCard; madrid: RecordData; opponent: RecordData; madrid_venue: RecordData; opponent_venue: RecordData; previous_meetings: MatchCard[]};
+export type Changes = {available: boolean; reason?: string; from?: string; to?: string; note?: string; changes?: {team: string; position_change: number; points_change: number}[]; results_in_interval?: MatchCard[]};
+export async function getData<T>(path: string): Promise<T> {
+  const base = (process.env.API_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
+  const response = await fetch(`${base}${path}`, {cache: "no-store", signal: AbortSignal.timeout(10_000)});
+  if (!response.ok) throw new Error("Data unavailable");
   return response.json();
 }

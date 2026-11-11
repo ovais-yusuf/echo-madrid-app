@@ -10,7 +10,7 @@ hallucinated.
 
 "Ask Echo" lets you ask questions like *"Where is Real Madrid in the La Liga
 table?"* or *"What was their last result?"* and returns answers computed from a
-live database of matches and standings. The language model never invents
+stored database of matches and standings. The language model never invents
 statistics — it can only answer from data returned by real database queries, and
 says so when the data isn't there.
 
@@ -29,15 +29,15 @@ Echo Madrid is a four-layer system, not a chatbot:
    AI layer.
 4. **Ask Echo** — a grounded natural-language interface built on OpenAI tool
    calling. The model translates a question into a call against the same query
-   functions the API uses, the app executes the real query, and the model
-   phrases an answer from the returned rows only.
+   functions the API uses, the app executes the real query, and deterministic templates
+   render the answer from the returned rows only.
 
 ### Grounding design
 
 The core design principle: the LLM is a translator, not a knowledge source. It
 selects which query function to call and with what arguments; the application
-executes the query and returns real rows; the model answers only from those rows.
-This means Ask Echo cannot fabricate a scoreline or a league position — every
+executes the query and renders factual text from those rows.
+Factual responses are rendered deterministically from tool evidence — every
 number traces to a database row, and missing data yields "I don't have that"
 rather than an invention.
 
@@ -46,7 +46,7 @@ rather than an invention.
 - **Backend:** Python, FastAPI, SQLAlchemy, Alembic
 - **Database:** PostgreSQL
 - **AI:** OpenAI API (function/tool calling)
-- **Infra:** Docker, Docker Compose, deployed on Railway
+- **Infra:** Docker, Docker Compose, Railway and Render configuration (active host must be verified)
 - **Data source:** football-data.org API
 
 ## Running locally
@@ -64,8 +64,8 @@ alembic upgrade head
 
 # Ingest data
 cd ..
-python -m pipeline.ingest_matches
-python -m pipeline.ingest_standings
+PYTHONPATH=api:. python -m pipeline.ingest_matches
+PYTHONPATH=api:. python -m pipeline.ingest_standings
 
 # Run the app
 cd api
@@ -77,23 +77,20 @@ uvicorn app.main:app --reload
 
 Echo Madrid is a solo-built engineering project. It is an unofficial fan project
 and is not affiliated with Real Madrid CF.
-## Multi-page frontend
+## Application pages
 
-`web/` contains the Next.js App Router frontend, with a shared white, navy, and
-gold site shell. Available pages:
+The Next.js frontend in `/web` includes Home, Matches, Matchday, Standings and Team.
+Home and Team already exist; this update extends them. Matchday adds provider states,
+opponent previews, shareable PNG cards and stable calendar downloads. Standings
+switches La Liga/Champions League, records real snapshots and includes an explicitly
+hypothetical La Liga simulator. Team includes scoring trends and home/away samples.
 
-- `/standings`: latest stored La Liga table, Madrid highlights, club search,
-  a Madrid-only filter, and snapshot timestamps.
-- `/matches`: Madrid fixtures and results, with upcoming/results/all views,
-  competition and season filters, pagination, stored scores, and UTC times.
+All database queries remain in `api/app/queries.py`, shared by REST and Ask Echo.
+Ask Echo uses OpenAI for query selection and follow-up intent, then generates factual
+answers deterministically with supporting records and independent freshness times.
 
-Both pages have loading, empty, and recoverable error states. `/` redirects to
-Standings until Home is built. Home and Team remain reserved navigation items.
-Ask Echo links to the existing FastAPI page, which also uses the light palette.
-
-FastAPI exposes `GET /standings` and `GET /matches`. All SQL remains in
-`app/queries.py`; both the API and Ask Echo use the shared query layer.
-No schema change is needed for either page.
-
-See [LOCAL_REVIEW.md](LOCAL_REVIEW.md) for the incremental patch, local setup,
-API filtering rules, verification checklist, tests, and Railway configuration.
+The repository includes a hosted ingestion worker and GitHub Actions schedule.
+**Pushing alone does not configure the database secrets or verify production refresh.**
+See [DEPLOYMENT.md](DEPLOYMENT.md) for migration, host configuration, scheduling,
+provider limits and production verification. The older LOCAL_REVIEW.md describes the
+previous UI patch; DEPLOYMENT.md supersedes its deployment/refresh instructions.

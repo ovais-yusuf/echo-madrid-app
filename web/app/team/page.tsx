@@ -1,3 +1,4 @@
+import { SeasonAnalysis } from "@/components/season-analysis";
 import type { Metadata } from "next";
 import {
   getStandings,
@@ -199,6 +200,7 @@ export default async function TeamPage() {
             </p>
           )}
 
+          <SeasonAnalysis />
           <section className="team-block" aria-label="Recent form">
             <h2>Recent form</h2>
             {results === null ? (
