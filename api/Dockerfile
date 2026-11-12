@@ -9,4 +9,4 @@ COPY --chown=appuser:appuser api /app/api
 COPY --chown=appuser:appuser pipeline /app/pipeline
 USER appuser
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "/app/api/start.sh"]

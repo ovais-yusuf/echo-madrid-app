@@ -25,8 +25,8 @@ cd api
 alembic upgrade head
 ```
 
-Railway's root `railway.toml` declares the API build, predeploy migration and health
-check. Ensure the existing Railway API service's root directory is `/`, config is
+Railway's root `railway.toml` declares the API build, startup script and health
+check. The startup script applies migrations before starting the API. Ensure the existing Railway API service's root directory is `/`, config is
 `railway.toml`, and Dockerfile is `api/Dockerfile`. The existing Next.js service
 continues to build from `/web`; do not apply the backend Railway config to it.
 Render's existing blueprint now uses the root context and migrates before starting
@@ -154,3 +154,19 @@ npm run build
 CI includes a disposable PostgreSQL 16 service to test actual migrations and
 cross-connection advisory locking. That test skips locally without
 `TEST_POSTGRES_URL`. Never point that variable at a development/production database.
+
+
+## Startup command troubleshooting
+
+If a deployment builds successfully but exits with status 127 and reports the whole
+`cd ... && alembic ... && uvicorn ...` expression as "not found", the hosting
+command override has interpreted nested shell quoting incorrectly. The API now
+uses `api/start.sh` for migrations and server startup. Both the image default and
+the Blueprint call the same script without nested quotes.
+
+For an existing Render service, sync its Blueprint. If its Docker Command setting
+still contains the old inline command, set it to `sh /app/api/start.sh` (without
+quotes), or clear the override to use the image default, and redeploy the latest
+commit. This requires no paid pre-deploy hook. The script stops if migrations fail,
+uses the provided `PORT` (8000 by default), and replaces the shell with Uvicorn for
+normal signal handling. Worker start commands remain `python -m pipeline.worker`.

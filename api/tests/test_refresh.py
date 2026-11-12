@@ -105,7 +105,18 @@ def test_team_record_and_opponent_coverage(db):
     assert team_record(db,team,season='2027/2028')['count']==0
 
 
-def test_retries_and_permanent_errors(monkeypatch):
+@pytest.fixture
+def offline_provider_client(monkeypatch):
+    real_client = httpx.Client
+    def client(**kwargs):
+        # These tests replace get() and never make network requests. Avoid
+        # requiring local proxy dependencies merely to construct the client.
+        return real_client(**kwargs, trust_env=False,
+                           transport=httpx.MockTransport(lambda request: httpx.Response(500)))
+    monkeypatch.setattr('pipeline.ingest_matches.httpx.Client', client)
+
+
+def test_retries_and_permanent_errors(monkeypatch, offline_provider_client):
     monkeypatch.setattr('pipeline.ingest_matches.time.sleep',lambda _:None)
     with FootballDataClient('test-only') as client:
         client._limiter.wait=Mock()
@@ -118,7 +129,7 @@ def test_retries_and_permanent_errors(monkeypatch):
         assert client._client.get.call_count==1
 
 
-def test_retry_budget_and_long_retry_after(monkeypatch):
+def test_retry_budget_and_long_retry_after(monkeypatch, offline_provider_client):
     monkeypatch.setattr('pipeline.ingest_matches.time.sleep',lambda _:None)
     with FootballDataClient('test-only') as client:
         client._limiter.wait=Mock()
